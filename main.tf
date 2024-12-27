@@ -16,7 +16,7 @@ data "aws_availability_zones" "available" {
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "3.14.2"
+  version = "5.17.0"
 
   cidr = var.vpc_cidr_block
 
@@ -32,7 +32,7 @@ module "vpc" {
 
 module "app_security_group" {
   source  = "terraform-aws-modules/security-group/aws//modules/web"
-  version = "4.9.0"
+  version = "5.2.0"
 
   name        = "web-server-sg-${var.project_name}-${var.environment}"
   description = "Security group for web-servers with HTTP ports open within VPC"
@@ -43,7 +43,7 @@ module "app_security_group" {
 
 module "lb_security_group" {
   source  = "terraform-aws-modules/security-group/aws//modules/web"
-  version = "4.9.0"
+  version = "5.2.0"
 
   name = "load-balancer-sg-${var.project_name}-${var.environment}"
 
@@ -60,7 +60,7 @@ resource "random_string" "lb_id" {
 
 module "elb_http" {
   source  = "terraform-aws-modules/elb/aws"
-  version = "3.0.1"
+  version = "4.0.2"
 
   # Comply with ELB name restrictions
   # https://docs.aws.amazon.com/elasticloadbalancing/2012-06-01/APIReference/API_CreateLoadBalancer.html
@@ -70,8 +70,8 @@ module "elb_http" {
   security_groups = [module.lb_security_group.security_group_id]
   subnets         = module.vpc.public_subnets
 
-  number_of_instances = 2
-  instances           = [aws_instance.app_a.id, aws_instance.app_b.id]
+  number_of_instances = length(aws_instance.app)
+  instances           = aws_instance.app.*.id
 
   listener = [{
     instance_port     = "80"
@@ -99,13 +99,15 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
-resource "aws_instance" "app_a" {
+resource "aws_instance" "app" {
   depends_on = [module.vpc]
+  
+  count = var.instances_per_subnet * length(module.vpc.private_subnets)
 
   ami           = data.aws_ami.amazon_linux.id
   instance_type = var.instance_type
 
-  subnet_id              = module.vpc.private_subnets[0]
+  subnet_id              = module.vpc.private_subnets[count.index % length(module.vpc.private_subnets)]
   vpc_security_group_ids = [module.app_security_group.security_group_id]
 
   user_data = <<-EOF
@@ -124,27 +126,3 @@ resource "aws_instance" "app_a" {
   }
 }
 
-resource "aws_instance" "app_b" {
-  depends_on = [module.vpc]
-
-  ami           = data.aws_ami.amazon_linux.id
-  instance_type = var.instance_type
-
-  subnet_id              = module.vpc.private_subnets[1]
-  vpc_security_group_ids = [module.app_security_group.security_group_id]
-
-  user_data = <<-EOF
-    #!/bin/bash
-    sudo yum update -y
-    sudo yum install httpd -y
-    sudo systemctl enable httpd
-    sudo systemctl start httpd
-    echo "<html><body><div>Hello, world!</div></body></html>" > /var/www/html/index.html
-    EOF
-
-  tags = {
-    Terraform   = "true"
-    Project     = var.project_name
-    Environment = var.environment
-  }
-}
