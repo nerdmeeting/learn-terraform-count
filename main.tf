@@ -101,11 +101,13 @@ data "aws_ami" "amazon_linux" {
 
 resource "aws_instance" "app" {
   depends_on = [module.vpc]
+  
+  count = var.instances_per_subnet * length(module.vpc.private_subnets)
 
   ami           = data.aws_ami.amazon_linux.id
   instance_type = var.instance_type
 
-  subnet_id              = module.vpc.private_subnets[0]
+  subnet_id              = module.vpc.private_subnets[count.index % length(module.vpc.private_subnets)]
   vpc_security_group_ids = [module.app_security_group.security_group_id]
 
   user_data = <<-EOF
